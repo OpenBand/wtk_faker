@@ -35,27 +35,37 @@ import unidecode
 
 class HumanLikeOptions():
 
-    HSTR_MIN_LEN = 8
-    CHUNK_LEN = 8
+    MAXUSE_LOCALS = 5
+    MINLEN = 3
+    MAXLEN = 16
+
     DNOISE_MAXLEN = 1
     DNOISE_COND = 1
     CREATE_ATTEMPTS = 3
+    DATABASE_MAXLEN = 10**8
 
 
 class HumanLike():
     
-    def __init__(self):
+    def __init__(self, create):
         self._db = None
-        self.generators = {}
-        for l in faker.config.AVAILABLE_LOCALES:
-            fake = faker.Factory.create(l)
-            self.generators[l] = [fake.last_name, 
-                                  fake.first_name, 
-                                  fake.company]
+        if create:
+            ls = []
+            for _ in range(0, HumanLikeOptions.MAXUSE_LOCALS):
+                ls.append(WRand.choice(faker.config.AVAILABLE_LOCALES))
+            WGui.debug(f"AVAILABLE_LOCALES = {ls}")
+            self.generators = {}
+            for l in ls:
+                fake = faker.Factory.create(l)
+                self.generators[l] = [fake.last_name, 
+                                      fake.first_name, 
+                                      fake.company]
+        else:
+            self.generators = None
     
     @staticmethod
     def check(hstr:str):
-        if len(hstr) < 3 or len(hstr) > 16:
+        if len(hstr) < HumanLikeOptions.MINLEN or len(hstr) > HumanLikeOptions.MAXLEN * 2:
             return False
         if hstr is hstr.lower():
             return False
@@ -66,16 +76,20 @@ class HumanLike():
         return True
     
     @staticmethod
-    def create_with_db(database_file):
-        obj = HumanLike()
-        obj._db = BloomFilter(max_elements=10**8, error_rate=0.01, filename=(database_file, -1))
+    def create_with_db(database_file, create):
+        obj = HumanLike(create)
+        obj._db = BloomFilter(max_elements=HumanLikeOptions.DATABASE_MAXLEN, 
+                              error_rate=0.01, filename=(database_file, -1))
         return obj
 
     def suggest_string(self):
+        if not self.generators:
+            raise ValueError("Generator has not been initialized")
+
         result = ""
-        new_len = WRand.get_int(HumanLikeOptions.HSTR_MIN_LEN, 16)
-        fake_chunk = WRand.get_int(3, HumanLikeOptions.CHUNK_LEN)
-        rest_chunk = WRand.get_int(2, HumanLikeOptions.CHUNK_LEN)
+        half_len = HumanLikeOptions.MAXLEN // 2 + HumanLikeOptions.MINLEN
+        new_len = WRand.get_int(half_len, half_len * 2)
+        rest_chunk = WRand.get_int(HumanLikeOptions.MINLEN, half_len)
         generators = self.generators[WRand.choice(list(self.generators.keys()))]
         while len(result) < new_len:
             generator = WRand.choice(generators)
@@ -93,7 +107,7 @@ class HumanLike():
                     result[n] = WRand.choice(['.', '-'])
                     result = "".join(result)
             if new_len - len(result) < rest_chunk:
-                break            
+                break
         result = re.sub(r'([.]|[-]){2,}', r'\1', result)
         for i in range(2):
             result = re.sub(r'^([a-z]{,3})(\.|\-)', r'\1', result)
@@ -112,32 +126,46 @@ class HumanLike():
             result = result[:-1]
         return result
     
-    def create_string(self, limit:int = HumanLikeOptions.CREATE_ATTEMPTS):
+    def create_string(self, limit):
         result = ""
         lp = 0
-        while (len(result) < 1 or
-               not self.check(result) or
-               result in self._db_index):
+        while True:
             result = self.suggest_string()
-            if not self._db or result not in self._db:
-                break
+            if self.check(result):
+                if not self._db or result not in self._db:
+                    break
             lp = lp + 1
             if lp > limit:
-                raise ValueError("Can't create unique")
+                raise ValueError("Can't create unique string")
+            WGui.warning(f"Attempt #{lp}: '{result}' - failed. {limit - lp} Left")
         if self._db:
             self._db.add(result)
         return result
+
+    def check_uniqueness(self, test):
+        if not test or not isinstance(test, str) or not any(test):
+            raise  ValueError("Can't test for empty or invalid string")
+
+        if not self._db:
+            raise ValueError("Database is required")
+        
+        return test not in self._db
 
 
 def main(options):
     try:
         if options.database:
-            humanlike = HumanLike.create_with_db(options.database)
+            humanlike = HumanLike.create_with_db(options.database,  options.create)
         else:
-            humanlike = HumanLike()
+            humanlike = HumanLike(options.create)
     
-        if options.create:
-            fstr = humanlike.create_string()
+        if options.test:
+            if not humanlike.check_uniqueness(options.test):
+                WGui.warning(f"'{options.test}' is not unique")
+                return 1
+            WGui.ok(f"'{options.test}' is unique")
+        elif options.create:
+            fstr = humanlike.create_string(HumanLikeOptions.CREATE_ATTEMPTS)
             WGui.print(fstr)
         else:
             WGui.print(humanlike.suggest_string())
@@ -154,6 +182,8 @@ if __name__ == '__main__':
                       "It is trying to create uniq string.")
     parser.add_option("-d", "--database", dest="database",
                       help="Database binary file to control uniqueness", metavar="FILE")
+    parser.add_option("-t", "--test", dest="test",
+                      help="Check the input string for uniqueness (database is required)", metavar="FILE")
     (options, args) = parser.parse_args()
     
     if len(sys.argv) < 2:

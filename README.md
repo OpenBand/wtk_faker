@@ -18,17 +18,19 @@ rm -rf .venv
 
 ## Another way is to build Docker container:
 
+To use inside a custom application in docker infrastructure.
+
 Deploy and run:
 ```
-docker build -t wfaker.my_set .
+docker build -t wfaker.application_domain .
 # Remove intermediate build image to save disk space
 docker rmi $(docker images -q -f dangling=true)
-docker run --rm wfaker.my_set
+docker run --rm wfaker.application_domain
 ```
 
 Cleanup:
 ```
-docker rmi wfaker.my_set
+docker rmi wfaker.application_domain
 docker system prune -f
 ```
-> and remember about base Python container (python:3.9-slim)
+> and remember about base Python container (for example _python:3.9-slim_)
