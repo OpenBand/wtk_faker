@@ -31,6 +31,7 @@ import os
 import re
 import sys
 import unidecode
+import base58
 
 
 class HumanLikeOptions():
@@ -160,13 +161,19 @@ def main(options):
             humanlike = HumanLike(options.create)
     
         if options.test:
-            if not humanlike.check_uniqueness(options.test):
+            t = options.test 
+            if options.robot:
+                t = str(base58.b58decode(t), 'utf-8')
+            if not humanlike.check_uniqueness(t):
                 WGui.warning(f"'{options.test}' is not unique")
                 return 1
             WGui.ok(f"'{options.test}' is unique")
         elif options.create:
             fstr = humanlike.create_string(HumanLikeOptions.CREATE_ATTEMPTS)
-            WGui.print(fstr)
+            if options.robot:
+                WGui.print(str(base58.b58encode(fstr), 'utf-8'))
+            else:
+                WGui.print(fstr)
         else:
             WGui.print(humanlike.suggest_string())
         
@@ -183,7 +190,9 @@ if __name__ == '__main__':
     parser.add_option("-d", "--database", dest="database",
                       help="Database binary file to control uniqueness", metavar="FILE")
     parser.add_option("-t", "--test", dest="test",
-                      help="Check the input string for uniqueness (database is required)", metavar="FILE")
+                      help="Check the input string for uniqueness (database is required)")
+    parser.add_option("-r", "--robot", dest="robot", default=False, action="store_true",
+                      help="Operate with string in Base58 format")
     (options, args) = parser.parse_args()
     
     if len(sys.argv) < 2:
